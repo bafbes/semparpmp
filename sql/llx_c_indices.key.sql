@@ -1,0 +1,1 @@
+ALTER TABLE llx_c_indices ADD UNIQUE INDEX uk_code (code, entity);
