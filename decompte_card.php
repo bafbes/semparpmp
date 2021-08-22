@@ -234,16 +234,7 @@ if ($action == 'create')
 	// Other attributes
 	include DOL_DOCUMENT_ROOT.'/core/tpl/extrafields_add.tpl.php';
 
-	print '</table>'."\n";
-
-	print dol_get_fiche_end();
-
-	print '<div class="center">';
-	print '<input type="submit" class="button" name="add" value="'.dol_escape_htmltag($langs->trans("CreateDraft")).'">';
-	print '&nbsp; ';
-	print '<input type="'.($backtopage ? "submit" : "button").'" class="button button-cancel" name="cancel" value="'.dol_escape_htmltag($langs->trans("Cancel")).'"'.($backtopage ? '' : ' onclick="javascript:history.go(-1)"').'>'; // Cancel for create does not post form if we don't know the backtopage
-	print '</div>';
-
+    // Load objectsrc
     $remise_absolue = 0;
     if (!empty($origin) && !empty($originid))
     {
@@ -354,6 +345,55 @@ if ($action == 'create')
 
         if (!empty($conf->multicurrency->enabled) && !empty($soc->multicurrency_code)) $currency_code = $soc->multicurrency_code;
     }
+
+    // Lines from source (TODO Show them also when creating invoice from template invoice)
+    if (!empty($origin) && !empty($originid) && is_object($objectsrc))
+    {
+
+        print "\n<!-- ".$classname." info -->";
+        print "\n";
+        print '<input type="hidden" name="amount"         value="'.$objectsrc->total_ht.'">'."\n";
+        print '<input type="hidden" name="total"          value="'.$objectsrc->total_ttc.'">'."\n";
+        print '<input type="hidden" name="tva"            value="'.$objectsrc->total_tva.'">'."\n";
+        print '<input type="hidden" name="origin"         value="'.$objectsrc->element.'">';
+        print '<input type="hidden" name="originid"       value="'.$objectsrc->id.'">';
+
+        $newclassname = 'CommercialProposal';
+
+
+        print '<tr><td>'.$langs->trans($newclassname).'</td><td colspan="2">'.$objectsrc->getNomUrl(1);
+        // We check if Origin document (id and type is known) has already at least one invoice attached to it
+        $objectsrc->fetchObjectLinked($originid, $origin, '', 'facture');
+        if (is_array($objectsrc->linkedObjects['facture']) && count($objectsrc->linkedObjects['facture']) >= 1)
+        {
+            setEventMessages('WarningBillExist', null, 'warnings');
+            echo ' ('.$langs->trans('LatestRelatedBill').' '.end($objectsrc->linkedObjects['facture'])->getNomUrl(1).')';
+        }
+        echo '</td></tr>';
+        print '<tr><td>'.$langs->trans("Montant de l'offre").'</td><td colspan="2">'.price($objectsrc->total_ht).'</td></tr>';
+        if ($mysoc->localtax2_assuj == "1" || $objectsrc->total_localtax2 != 0) 		// Localtax2
+        {
+            print '<tr><td>'.$langs->transcountry("AmountLT2", $mysoc->country_code).'</td><td colspan="2">'.price($objectsrc->total_localtax2)."</td></tr>";
+        }
+        print '<tr><td>'.$langs->trans("Montant de l'offre").'</td><td colspan="2">'.price($objectsrc->total_ttc)."</td></tr>";
+
+        if (!empty($conf->multicurrency->enabled))
+        {
+            print '<tr><td>'.$langs->trans('MulticurrencyAmountHT').'</td><td colspan="2">'.price($objectsrc->multicurrency_total_ht).'</td></tr>';
+            print '<tr><td>'.$langs->trans('MulticurrencyAmountTTC').'</td><td colspan="2">'.price($objectsrc->multicurrency_total_ttc)."</td></tr>";
+        }
+    }
+
+    print '</table>'."\n";
+
+	print dol_get_fiche_end();
+
+	print '<div class="center">';
+	print '<input type="submit" class="button" name="add" value="'.dol_escape_htmltag($langs->trans("CreateDraft")).'">';
+	print '&nbsp; ';
+	print '<input type="'.($backtopage ? "submit" : "button").'" class="button button-cancel" name="cancel" value="'.dol_escape_htmltag($langs->trans("Cancel")).'"'.($backtopage ? '' : ' onclick="javascript:history.go(-1)"').'>'; // Cancel for create does not post form if we don't know the backtopage
+	print '</div>';
+
 
 	if (!empty($origin) && !empty($originid) && is_object($objectsrc)) {
         print '<br>';
