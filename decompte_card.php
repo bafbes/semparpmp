@@ -554,8 +554,56 @@ if ($object->id > 0 && (empty($action) || ($action != 'edit' && $action != 'crea
 	//unset($object->fields['fk_project']);				// Hide field already shown in banner
 	//unset($object->fields['fk_soc']);					// Hide field already shown in banner
 	include DOL_DOCUMENT_ROOT.'/core/tpl/commonfields_view.tpl.php';
+    // Other attributes
+    $cols = 2;
+    //include DOL_DOCUMENT_ROOT.'/core/tpl/extrafields_view.tpl.php';
 
-	// Other attributes. Fields from hook formObjectOptions and Extrafields.
+    print '</table>';
+
+    print '</div>';
+    print '<div class="fichehalfright">';
+    print '<div class="ficheaddleft">';
+
+    print '<!-- amounts -->'."\n";
+    print '<table class="border bordertop tableforfield centpercent">';
+
+    $sign = 1;
+    if (!empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE_SCREEN) && $object->type == $object::TYPE_CREDIT_NOTE) {
+        $sign = -1; // We invert sign for output
+    }
+
+    if (!empty($conf->multicurrency->enabled) && ($object->multicurrency_code != $conf->currency))
+    {
+        // Multicurrency Amount HT
+        print '<tr><td class="titlefieldmiddle">'.$form->editfieldkey('MulticurrencyAmountHT', 'multicurrency_total_ht', '', $object, 0).'</td>';
+        print '<td class="nowrap amountcard">'.price($sign * $object->multicurrency_total_ht, '', $langs, 0, -1, -1, (!empty($object->multicurrency_code) ? $object->multicurrency_code : $conf->currency)).'</td>';
+        print '</tr>';
+
+        // Multicurrency Amount VAT
+        print '<tr><td>'.$form->editfieldkey('MulticurrencyAmountVAT', 'multicurrency_total_tva', '', $object, 0).'</td>';
+        print '<td class="nowrap amountcard">'.price($sign * $object->multicurrency_total_tva, '', $langs, 0, -1, -1, (!empty($object->multicurrency_code) ? $object->multicurrency_code : $conf->currency)).'</td>';
+        print '</tr>';
+
+        // Multicurrency Amount TTC
+        print '<tr><td>'.$form->editfieldkey('MulticurrencyAmountTTC', 'multicurrency_total_ttc', '', $object, 0).'</td>';
+        print '<td class="nowrap amountcard">'.price($sign * $object->multicurrency_total_ttc, '', $langs, 0, -1, -1, (!empty($object->multicurrency_code) ? $object->multicurrency_code : $conf->currency)).'</td>';
+        print '</tr>';
+    }
+
+    // Amount
+    print '<tr><td class="titlefieldmiddle">'.$langs->trans('AmountHT').'</td>';
+    print '<td class="nowrap amountcard">'.price($sign * $object->total_ht, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
+    
+    // Total with tax
+    print '<tr><td>'.$langs->trans('AmountTTC').'</td><td class="nowrap amountcard">'.price($sign * $object->total_ttc, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
+
+    print '</table>';
+
+
+    $nbrows = 8;
+    $nbcols = 3;
+
+    // Other attributes. Fields from hook formObjectOptions and Extrafields.
 	include DOL_DOCUMENT_ROOT.'/core/tpl/extrafields_view.tpl.php';
 
 	print '</table>';
