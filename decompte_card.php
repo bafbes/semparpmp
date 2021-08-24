@@ -592,10 +592,10 @@ if ($object->id > 0 && (empty($action) || ($action != 'edit' && $action != 'crea
 
     // Amount
     print '<tr><td class="titlefieldmiddle">'.$langs->trans('AmountHT').'</td>';
-    print '<td class="nowrap amountcard">'.price($sign * $object->total_ht, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
+    print '<td class="nowrap amountcard">'.price($sign * $object->amount, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
     
     // Total with tax
-    print '<tr><td>'.$langs->trans('AmountTTC').'</td><td class="nowrap amountcard">'.price($sign * $object->total_ttc, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
+    print '<tr><td>'.$langs->trans('AmountTTC').'</td><td class="nowrap amountcard">'.price($sign * $object->amount, 1, '', 1, - 1, - 1, $conf->currency).'</td></tr>';
 
     print '</table>';
 
