@@ -151,34 +151,34 @@ class Decompte extends CommonObject
 	// /**
 	//  * @var string    Name of subtable line
 	//  */
-	// public $table_element_line = 'semparpmp_decompteline';
+	 public $table_element_line = 'semparpmp_decompteline';
 
 	// /**
 	//  * @var string    Field with ID of parent key if this object has a parent
 	//  */
-	// public $fk_element = 'fk_decompte';
+	 public $fk_element = 'fk_decompte';
 
 	// /**
 	//  * @var string    Name of subtable class that manage subtable lines
 	//  */
-	// public $class_element_line = 'Decompteline';
+	 public $class_element_line = 'DecompteLine';
 
 	// /**
 	//  * @var array	List of child tables. To test if we can delete object.
 	//  */
-	// protected $childtables = array();
+	 protected $childtables = array();
 
 	// /**
 	//  * @var array    List of child tables. To know object to delete on cascade.
 	//  *               If name matches '@ClassNAme:FilePathClass;ParentFkFieldName' it will
 	//  *               call method deleteByParentField(parentId, ParentFkFieldName) to fetch and delete child object
 	//  */
-	// protected $childtablesoncascade = array('semparpmp_decomptedet');
+	 protected $childtablesoncascade = array('semparpmp_decompteline');
 
 	// /**
 	//  * @var DecompteLine[]     Array of subtable lines
 	//  */
-	// public $lines = array();
+	 public $lines = array();
 
 
 
@@ -227,7 +227,396 @@ class Decompte extends CommonObject
 		}
 	}
 
-	/**
+    /**
+     *  Add an invoice line into database (linked to product/service or not).
+     *  Les parametres sont deja cense etre juste et avec valeurs finales a l'appel
+     *  de cette methode. Aussi, pour le taux tva, il doit deja avoir ete defini
+     *  par l'appelant par la methode get_default_tva(societe_vendeuse,societe_acheteuse,produit)
+     *  et le desc doit deja avoir la bonne valeur (a l'appelant de gerer le multilangue)
+     *
+     *  @param    	string		$desc            	Description of line
+     *  @param    	double		$pu_ht              Unit price without tax (> 0 even for credit note)
+     *  @param    	double		$qty             	Quantity
+     *  @param    	double		$txtva           	Force Vat rate, -1 for auto (Can contain the vat_src_code too with syntax '9.9 (CODE)')
+     *  @param		double		$txlocaltax1		Local tax 1 rate (deprecated, use instead txtva with code inside)
+     *  @param		double		$txlocaltax2		Local tax 2 rate (deprecated, use instead txtva with code inside)
+     *  @param    	int			$fk_product      	Id of predefined product/service
+     *  @param    	double		$remise_percent  	Percent of discount on line
+     *  @param    	int			$date_start      	Date start of service
+     *  @param    	int			$date_end        	Date end of service
+     *  @param    	int			$ventil          	Code of dispatching into accountancy
+     *  @param    	int			$info_bits			Bits of type of lines
+     *  @param    	int			$fk_remise_except	Id discount used
+     *  @param		string		$price_base_type	'HT' or 'TTC'
+     *  @param    	double		$pu_ttc             Unit price with tax (> 0 even for credit note)
+     *  @param		int			$type				Type of line (0=product, 1=service). Not used if fk_product is defined, the type of product is used.
+     *  @param      int			$rang               Position of line
+     *  @param		int			$special_code		Special code (also used by externals modules!)
+     *  @param		string		$origin				Depend on global conf MAIN_CREATEFROM_KEEP_LINE_ORIGIN_INFORMATION can be 'orderdet', 'propaldet'..., else 'order','propal,'....
+     *  @param		int			$origin_id			Depend on global conf MAIN_CREATEFROM_KEEP_LINE_ORIGIN_INFORMATION can be Id of origin object (aka line id), else object id
+     *  @param		int			$fk_parent_line		Id of parent line
+     *  @param		int			$fk_fournprice		Supplier price id (to calculate margin) or ''
+     *  @param		int			$pa_ht				Buying price of line (to calculate margin) or ''
+     *  @param		string		$label				Label of the line (deprecated, do not use)
+     *  @param		array		$array_options		extrafields array
+     *  @param      int         $situation_percent  Situation advance percentage
+     *  @param      int         $fk_prev_id         Previous situation line id reference
+     *  @param 		string		$fk_unit 			Code of the unit to use. Null to use the default one
+     *  @param		double		$pu_ht_devise		Unit price in foreign currency
+     *  @param		string		$ref_ext		    External reference of the line
+     *  @return    	int             				<0 if KO, Id of line if OK
+     */
+    public function addline(
+        $desc,
+        $pu_ht,
+        $qty,
+        $txtva,
+        $date_creation = '',
+        $tms = '',
+        $price_base_type = 'HT',
+        $pu_ttc = 0,
+        $rang = -1,
+        $origin = '',
+        $origin_id = 0,
+        $fk_parent_line = 0,
+        $label = '',
+        $array_options = 0,
+        $fk_unit = null
+    ) {
+        // Deprecation warning
+        if ($label) {
+            dol_syslog(__METHOD__.": using line label is deprecated", LOG_WARNING);
+            //var_dump(debug_backtrace(false));exit;
+        }
+
+        global $mysoc, $conf, $langs;
+
+        dol_syslog(get_class($this)."::addline id=$this->id,desc=$desc,pu_ht=$pu_ht,qty=$qty,txtva=$txtva, date_creation=$date_creation,tms=$tms,price_base_type=$price_base_type,pu_ttc=$pu_ttc,fk_unit=$fk_unit", LOG_DEBUG);
+
+        if ($this->statut == self::STATUS_DRAFT)
+        {
+            include_once DOL_DOCUMENT_ROOT.'/core/lib/price.lib.php';
+
+            // Clean parameters
+            if (empty($qty)) $qty = 0;
+            if (empty($rang)) $rang = 0;
+            if (empty($txtva)) $txtva = 0;
+            if (empty($fk_parent_line) || $fk_parent_line < 0) $fk_parent_line = 0;
+
+            $qty = price2num($qty);
+            $pu_ht = price2num($pu_ht);
+            $pu_ttc = price2num($pu_ttc);
+            if (!preg_match('/\((.*)\)/', $txtva)) {
+                $txtva = price2num($txtva); // $txtva can have format '5.0(XXX)' or '5'
+            }
+
+            if ($price_base_type == 'HT')
+            {
+                $pu = $pu_ht;
+            } else {
+                $pu = $pu_ttc;
+            }
+
+            $this->db->begin();
+
+
+
+            // Clean vat code
+            $reg = array();
+            $vat_src_code = '';
+            if (preg_match('/\((.*)\)/', $txtva, $reg))
+            {
+                $vat_src_code = $reg[1];
+                $txtva = preg_replace('/\s*\(.*\)/', '', $txtva); // Remove code into vatrate.
+            }
+
+            // Calcul du total TTC et de la TVA pour la ligne a partir de
+            // qty, pu, remise_percent et txtva
+            // TRES IMPORTANT: C'est au moment de l'insertion ligne qu'on doit stocker
+            // la part ht, tva et ttc, et ce au niveau de la ligne qui a son propre taux tva.
+
+            $tabprice = calcul_price_total($qty, $pu, $remise_percent=0, $txtva, $txlocaltax1=0, $txlocaltax2=0, 0, $price_base_type, $info_bits='', $product_type='', $mysoc, $localtaxes_type='', $situation_percent=0, $this->multicurrency_tx, $pu_ht_devise=0);
+
+            $total_ht  = $tabprice[0];
+            $total_tva = $tabprice[1];
+            $total_ttc = $tabprice[2];
+            $pu_ht = $tabprice[3];
+
+
+
+            // Rank to use
+            $ranktouse = $rang;
+            if ($ranktouse == -1)
+            {
+                $rangmax = $this->line_max($fk_parent_line);
+                $ranktouse = $rangmax + 1;
+            }
+
+            // Insert line
+            $this->line = new DecompteLine($this->db);
+
+            $this->line->context = $this->context;
+
+            $this->line->fk_decompte = $this->id;
+            $this->line->label = $label; // deprecated
+            $this->line->desc = $desc;
+
+            $this->line->qty = $qty; // For credit note, quantity is always positive and unit price negative
+            $this->line->subprice = $pu_ht; // For credit note, unit price always negative, always positive otherwise
+
+            $this->line->vat_src_code = $vat_src_code;
+            $this->line->tva_tx = $txtva;
+
+            $this->line->total_ht = $total_ht; // For credit note and if qty is negative, total is negative
+            $this->line->total_ttc = $total_ttc; // For credit note and if qty is negative, total is negative
+            $this->line->total_tva = $total_tva; // For credit note and if qty is negative, total is negative
+
+            $this->line->tms = $tms;
+            $this->line->rang = $ranktouse;
+
+            $this->line->fk_parent_line = $fk_parent_line;
+            $this->line->origin = $origin;
+            $this->line->origin_id = $origin_id;
+            $this->line->fk_unit = $fk_unit;
+
+
+
+            if (is_array($array_options) && count($array_options) > 0) {
+                $this->line->array_options = $array_options;
+            }
+
+            $result = $this->line->insert();
+            if ($result > 0)
+            {
+                // Reorder if child line
+                if (!empty($fk_parent_line)) $this->line_order(true, 'DESC');
+
+
+                if ($result > 0)
+                {
+                    $this->db->commit();
+                    return $this->line->id;
+                } else {
+                    $this->error = $this->db->lasterror();
+                    $this->db->rollback();
+                    return -1;
+                }
+            } else {
+                $this->error = $this->line->error;
+                $this->errors = $this->line->errors;
+                $this->db->rollback();
+                return -2;
+            }
+        } else {
+            dol_syslog(get_class($this)."::addline status of invoice must be Draft to allow use of ->addline()", LOG_ERR);
+            return -3;
+        }
+    }
+
+    /**
+     *  Update a detail line
+     *
+     *  @param     	int			$rowid           	Id of line to update
+     *  @param     	string		$desc            	Description of line
+     *  @param     	double		$pu              	Prix unitaire (HT ou TTC selon price_base_type) (> 0 even for credit note lines)
+     *  @param     	double		$qty             	Quantity
+     *  @param     	double		$remise_percent  	Percentage discount of the line
+     *  @param     	int		    $date_start      	Date de debut de validite du service
+     *  @param     	int		    $date_end        	Date de fin de validite du service
+     *  @param     	double		$txtva          	VAT Rate (Can be '8.5', '8.5 (ABC)')
+     * 	@param		double		$txlocaltax1		Local tax 1 rate
+     *  @param		double		$txlocaltax2		Local tax 2 rate
+     * 	@param     	string		$price_base_type 	HT or TTC
+     * 	@param     	int			$info_bits 		    Miscellaneous informations
+     * 	@param		int			$type				Type of line (0=product, 1=service)
+     * 	@param		int			$fk_parent_line		Id of parent line (0 in most cases, used by modules adding sublevels into lines).
+     * 	@param		int			$skip_update_total	Keep fields total_xxx to 0 (used for special lines by some modules)
+     * 	@param		int			$fk_fournprice		Id of origin supplier price
+     * 	@param		int			$pa_ht				Price (without tax) of product when it was bought
+     * 	@param		string		$label				Label of the line (deprecated, do not use)
+     * 	@param		int			$special_code		Special code (also used by externals modules!)
+     *  @param		array		$array_options		extrafields array
+     * 	@param      int         $situation_percent  Situation advance percentage
+     * 	@param 		string		$fk_unit 			Code of the unit to use. Null to use the default one
+     * 	@param		double		$pu_ht_devise		Unit price in currency
+     * 	@param		int			$notrigger			disable line update trigger
+     *  @param		string		$ref_ext		    External reference of the line
+     *  @return    	int             				< 0 if KO, > 0 if OK
+     */
+    public function updateline($rowid, $desc, $pu, $qty, $date_creation, $tms, $txtva, $price_base_type = 'HT', $fk_parent_line = 0, $label = '',  $array_options = 0, $fk_unit = null,  $notrigger = 0)
+    {
+        global $conf, $user;
+        // Deprecation warning
+        if ($label) {
+            dol_syslog(__METHOD__.": using line label is deprecated", LOG_WARNING);
+        }
+
+        include_once DOL_DOCUMENT_ROOT.'/core/lib/price.lib.php';
+
+        global $mysoc, $langs;
+
+        dol_syslog(get_class($this)."::updateline rowid=$rowid, desc=$desc, pu=$pu, qty=$qty, date_creation=$date_creation, tms=$tms, txtva=$txtva, price_base_type=$price_base_type,  fk_parent_line=$fk_parent_line , fk_unit=$fk_unit", LOG_DEBUG);
+
+        if ($this->brouillon)
+        {
+
+            $this->db->begin();
+
+            // Clean parameters
+            if (empty($qty)) $qty = 0;
+            if (empty($fk_parent_line) || $fk_parent_line < 0) $fk_parent_line = 0;
+
+            $qty			= price2num($qty);
+            $pu 			= price2num($pu);
+            if (!preg_match('/\((.*)\)/', $txtva)) {
+                $txtva = price2num($txtva); // $txtva can have format '5.0(XXX)' or '5'
+            }
+
+
+            // Calculate total with, without tax and tax from qty, pu, remise_percent and txtva
+            // TRES IMPORTANT: C'est au moment de l'insertion ligne qu'on doit stocker
+            // la part ht, tva et ttc, et ce au niveau de la ligne qui a son propre taux tva.
+
+            // Clean vat code
+            $reg = array();
+            $vat_src_code = '';
+            if (preg_match('/\((.*)\)/', $txtva, $reg))
+            {
+                $vat_src_code = $reg[1];
+                $txtva = preg_replace('/\s*\(.*\)/', '', $txtva); // Remove code into vatrate.
+            }
+
+            $tabprice = calcul_price_total($qty, $pu, $remise_percent=0, $txtva, $txlocaltax1=0, $txlocaltax2=0, 0, $price_base_type, $info_bits=0, $type='', $mysoc, $localtaxes_type='', $situation_percent=0, $this->multicurrency_tx, $pu_ht_devise=0);
+
+            $total_ht  = $tabprice[0];
+            $total_tva = $tabprice[1];
+            $total_ttc = $tabprice[2];
+            $pu_ht  = $tabprice[3];
+            $pu_tva = $tabprice[4];
+            $pu_ttc = $tabprice[5];
+
+
+            // Old properties: $price, $remise (deprecated)
+            $price = $pu;
+            $remise = 0;
+
+            //Fetch current line from the database and then clone the object and set it in $oldline property
+            $line = new DecompteLine($this->db);
+            $line->fetch($rowid);
+            $line->fetch_optionals();
+
+            $staticline = clone $line;
+
+            $line->oldline = $staticline;
+            $this->line = $line;
+            $this->line->context = $this->context;
+
+            // Reorder if fk_parent_line change
+            if (!empty($fk_parent_line) && !empty($staticline->fk_parent_line) && $fk_parent_line != $staticline->fk_parent_line)
+            {
+                $rangmax = $this->line_max($fk_parent_line);
+                $this->line->rang = $rangmax + 1;
+            }
+
+            $this->line->id = $rowid;
+            $this->line->rowid				= $rowid;
+            $this->line->label				= $label;
+            $this->line->desc = $desc;
+            $this->line->qty = $qty; // For credit note, quantity is always positive and unit price negative
+
+            $this->line->tva_tx = $txtva;
+
+            $this->line->subprice			= $pu_ht; // For credit note, unit price always negative, always positive otherwise
+            $this->line->date_creation = $date_creation;
+            $this->line->tms			= $tms;
+            $this->line->total_ht			= $total_ht; // For credit note and if qty is negative, total is negative
+            $this->line->total_tva			= $total_tva;
+            $this->line->total_ttc			= $total_ttc;
+            $this->line->fk_parent_line = $fk_parent_line;
+            $this->line->fk_unit = $fk_unit;
+
+
+            if (is_array($array_options) && count($array_options) > 0) {
+                // We replace values in this->line->array_options only for entries defined into $array_options
+                foreach ($array_options as $key => $value) {
+                    $this->line->array_options[$key] = $array_options[$key];
+                }
+            }
+
+            $result = $this->line->update($user, $notrigger);
+            if ($result > 0)
+            {
+                // Reorder if child line
+                if (!empty($fk_parent_line)) $this->line_order(true, 'DESC');
+
+                // Mise a jour info denormalisees au niveau facture
+                $this->update_price(1);
+                $this->db->commit();
+                return $result;
+            } else {
+                $this->error = $this->line->error;
+                $this->db->rollback();
+                return -1;
+            }
+        } else {
+            $this->error = "Invoice statut makes operation forbidden";
+            return -2;
+        }
+    }
+
+    /**
+     *	Delete line in database
+     *
+     *	@param		int		$rowid		Id of line to delete
+     *	@return		int					<0 if KO, >0 if OK
+     */
+    public function deleteline($rowid)
+    {
+        global $user;
+
+        dol_syslog(get_class($this)."::deleteline rowid=".$rowid, LOG_DEBUG);
+
+        if (!$this->brouillon)
+        {
+            $this->error = 'ErrorDeleteLineNotAllowedByObjectStatus';
+            return -1;
+        }
+
+        $this->db->begin();
+
+
+        dol_syslog(get_class($this)."::deleteline", LOG_DEBUG);
+
+        $line = new DecompteLine($this->db);
+
+        $line->context = $this->context;
+
+        // For triggers
+        $result = $line->fetch($rowid);
+        if (!($result > 0)) dol_print_error($this->db, $line->error, $line->errors);
+
+        if ($line->delete($user) > 0)
+        {
+            $result = $this->update_price(1);
+
+            if ($result > 0)
+            {
+                $this->db->commit();
+                return 1;
+            } else {
+                $this->db->rollback();
+                $this->error = $this->db->lasterror();
+                return -1;
+            }
+        } else {
+            $this->db->rollback();
+            $this->error = $line->error;
+            return -1;
+        }
+    }
+
+
+    /**
 	 * Create object into database
 	 *
 	 * @param  User $user      User that creates
@@ -259,7 +648,7 @@ class Decompte extends CommonObject
 
 		// Load source object
 		$result = $object->fetchCommon($fromid);
-		if ($result > 0 && !empty($object->table_element_line)) $object->fetchLines();
+		if ($result > 0 && !empty($object->table_element_line)) $object->fetch_lines();
 
 		// get lines so they will be clone
 		//foreach($this->lines as $line)
@@ -342,7 +731,7 @@ class Decompte extends CommonObject
 	public function fetch($id, $ref = null)
 	{
 		$result = $this->fetchCommon($id, $ref);
-		if ($result > 0 && !empty($this->table_element_line)) $this->fetchLines();
+		if ($result > 0 && !empty($this->table_element_line)) $this->fetch_lines();
 		return $result;
 	}
 
@@ -351,12 +740,71 @@ class Decompte extends CommonObject
 	 *
 	 * @return int         <0 if KO, 0 if not found, >0 if OK
 	 */
-	public function fetchLines()
+	public function fetch_lines()
 	{
-		$this->lines = array();
+        global $langs, $conf;
+        // phpcs:enable
+        $this->lines = array();
 
-		$result = $this->fetchLinesCommon();
-		return $result;
+        $sql = 'SELECT l.rowid, l.fk_decompte, l.label as custom_label, l.description, l.amount, l.qty, l.tva_tx,';
+        $sql .= ' l.subprice,';
+        $sql .= ' l.rang, ';
+        $sql .= ' l.date_creation as date_creation, l.tms as tms,';
+        $sql .= ' l.total_ht, l.total_tva, l.total_ttc,';
+        $sql .= ' l.fk_unit';
+        $sql .= ' FROM '.MAIN_DB_PREFIX.'semparpmp_decompteline as l';
+        $sql .= ' WHERE l.fk_decompte = '.$this->id;
+        $sql .= ' ORDER BY l.rowid';
+
+        dol_syslog(get_class($this).'::fetch_lines', LOG_DEBUG);
+        $result = $this->db->query($sql);
+        if ($result)
+        {
+            $num = $this->db->num_rows($result);
+            $i = 0;
+            while ($i < $num)
+            {
+                $objp = $this->db->fetch_object($result);
+                $line = new DecompteLine($this->db);
+
+                $line->id               = $objp->rowid;
+                $line->rowid = $objp->rowid; // deprecated
+                $line->fk_decompte       = $objp->fk_decompte;
+                $line->label            = $objp->custom_label; // deprecated
+                $line->desc             = $objp->description; // Description line
+                $line->description      = $objp->description; // Description line
+                $line->ref              = $objp->product_ref; // Ref product
+                $line->product_ref      = $objp->product_ref; // Ref product
+                $line->libelle          = $objp->product_label; // deprecated
+                $line->product_label = $objp->product_label; // Label product
+                $line->product_desc     = $objp->product_desc; // Description product
+                $line->qty              = $objp->qty;
+                $line->subprice         = $objp->subprice;
+
+                $line->tva_tx           = $objp->tva_tx;
+                $line->date_creation       = $this->db->jdate($objp->date_creation);
+                $line->tms         = $this->db->jdate($objp->tms);
+                $line->date_creation       = $this->db->jdate($objp->date_creation);
+                $line->tms         = $this->db->jdate($objp->tms);
+                $line->total_ht         = $objp->total_ht;
+                $line->total_tva        = $objp->total_tva;
+                $line->total_ttc        = $objp->total_ttc;
+                $line->rang = $objp->rang;
+                $line->fk_unit = $objp->fk_unit;
+
+                $line->fetch_optionals();
+
+
+                $this->lines[$i] = $line;
+
+                $i++;
+            }
+            $this->db->free($result);
+            return 1;
+        } else {
+            $this->error = $this->db->error();
+            return -3;
+        }
 	}
 
 
@@ -461,25 +909,6 @@ class Decompte extends CommonObject
 	{
 		return $this->deleteCommon($user, $notrigger);
 		//return $this->deleteCommon($user, $notrigger, 1);
-	}
-
-	/**
-	 *  Delete a line of object in database
-	 *
-	 *	@param  User	$user       User that delete
-	 *  @param	int		$idline		Id of line to delete
-	 *  @param 	bool 	$notrigger  false=launch triggers after, true=disable triggers
-	 *  @return int         		>0 if OK, <0 if KO
-	 */
-	public function deleteLine(User $user, $idline, $notrigger = false)
-	{
-		if ($this->status < 0)
-		{
-			$this->error = 'ErrorDeleteLineNotAllowedByObjectStatus';
-			return -2;
-		}
-
-		return $this->deleteLineCommon($user, $idline, $notrigger);
 	}
 
 
@@ -891,21 +1320,9 @@ class Decompte extends CommonObject
 	 */
 	public function getLinesArray()
 	{
-		$this->lines = array();
+        return $this->fetch_lines();
 
-		$objectline = new DecompteLine($this->db);
-		$result = $objectline->fetchAll('ASC', 'position', 0, 0, array('customsql'=>'fk_decompte = '.$this->id));
-
-		if (is_numeric($result))
-		{
-			$this->error = $this->error;
-			$this->errors = $this->errors;
-			return $result;
-		} else {
-			$this->lines = $result;
-			return $this->lines;
-		}
-	}
+    }
 
 	/**
 	 *  Returns the reference to the following non used object depending on the active numbering module.
@@ -1047,18 +1464,332 @@ class DecompteLine extends CommonObjectLine
 	// To complete with content of an object DecompteLine
 	// We should have a field rowid, fk_decompte and position
 
-	/**
-	 * @var int  Does object support extrafields ? 0=No, 1=Yes
-	 */
-	public $isextrafieldmanaged = 0;
+    /**
+     * @var string ID to identify managed object
+     */
+    public $element = 'decompteline';
 
-	/**
-	 * Constructor
-	 *
-	 * @param DoliDb $db Database handler
-	 */
-	public function __construct(DoliDB $db)
-	{
-		$this->db = $db;
-	}
+    /**
+     * @var string Name of table without prefix where object is stored
+     */
+    public $table_element = 'semparpmp_decompteline';
+
+    public $oldline;
+
+    //! From llx_facturedet
+    //! Id facture
+    public $fk_decompte;
+    //! Id parent line
+    public $fk_parent_line;
+
+    //! Description ligne
+    public $desc;
+
+
+    public $rang = 0;
+
+
+    public $origin;
+    public $origin_id;
+
+
+    public $date_start;
+    public $date_end;
+
+
+
+    /**
+     *	Load invoice line from database
+     *
+     *	@param	int		$rowid      id of invoice line to get
+     *	@return	int					<0 if KO, >0 if OK
+     */
+    public function fetch($rowid)
+    {
+        $sql = 'SELECT fd.rowid, fd.fk_decompte, fd.label as custom_label, fd.description, fd.amount, fd.qty, fd.tva_tx,';
+        $sql .= ' fd.subprice,';
+        $sql .= ' fd.date_creation as date_creation, fd.tms as tms,';
+        $sql .= ' fd.total_ht, fd.total_tva, fd.total_ttc, fd.rang,';
+        $sql .= ' fd.fk_unit, fd.fk_user_creat, fd.fk_user_modif,';
+        $sql .= ' FROM '.MAIN_DB_PREFIX.'semparpmp_decompteline as fd';
+        $sql .= ' WHERE fd.rowid = '.$rowid;
+
+        $result = $this->db->query($sql);
+        if ($result)
+        {
+            $objp = $this->db->fetch_object($result);
+
+            $this->rowid = $objp->rowid;
+            $this->id = $objp->rowid;
+            $this->fk_decompte = $objp->fk_decompte;
+            $this->fk_parent_line = $objp->fk_parent_line;
+            $this->label				= $objp->custom_label;
+            $this->desc					= $objp->description;
+            $this->qty = $objp->qty;
+            $this->subprice = $objp->subprice;
+            $this->tva_tx = $objp->tva_tx;
+            $this->date_creation			= $this->db->jdate($objp->date_creation);
+            $this->tms				= $this->db->jdate($objp->tms);
+            $this->total_ht				= $objp->total_ht;
+            $this->total_tva			= $objp->total_tva;
+            $this->total_ttc			= $objp->total_ttc;
+            $this->rang					= $objp->rang;
+
+
+            $this->ref = $objp->product_ref; // deprecated
+
+            $this->product_ref = $objp->product_ref;
+            $this->product_label		= $objp->product_label;
+            $this->product_desc			= $objp->product_desc;
+
+            $this->fk_unit = $objp->fk_unit;
+            $this->fk_user_creat		= $objp->fk_user_creat;
+            $this->fk_user_author = $objp->fk_user_author;
+
+            $this->db->free($result);
+
+            return 1;
+        } else {
+            $this->error = $this->db->lasterror();
+            return -1;
+        }
+    }
+
+    /**
+     *	Insert line into database
+     *
+     *	@param      int		$notrigger		                 1 no triggers
+     *  @param      int     $noerrorifdiscountalreadylinked  1=Do not make error if lines is linked to a discount and discount already linked to another
+     *	@return		int						                 <0 if KO, >0 if OK
+     */
+    public function insert($notrigger = 0, $noerrorifdiscountalreadylinked = 0)
+    {
+        global $langs, $user, $conf;
+
+        $error = 0;
+
+
+        dol_syslog(get_class($this)."::insert rang=".$this->rang, LOG_DEBUG);
+
+        // Clean parameters
+        $this->desc = trim($this->desc);
+        if (empty($this->tva_tx)) $this->tva_tx = 0;
+        if (empty($this->rang)) $this->rang = 0;
+        if (empty($this->subprice)) $this->subprice = 0;
+        if (empty($this->fk_parent_line)) $this->fk_parent_line = 0;
+
+        $this->db->begin();
+
+        // Insertion dans base de la ligne
+        $sql = 'INSERT INTO '.MAIN_DB_PREFIX.'semparpmp_decompteline';
+        $sql .= ' (fk_decompte, label, description, qty,';
+        $sql .= ' tva_tx,';
+        $sql .= ' subprice, ';
+        $sql .= ' date_creation, tms,';
+        $sql .= ' rang,';
+        $sql .= ' total_ht, total_tva, total_ttc,';
+        $sql .= ' fk_unit, fk_user_creat, fk_user_modif';
+        $sql .= ')';
+        $sql .= " VALUES (".$this->fk_decompte.",";
+        $sql .= " ".(!empty($this->label) ? "'".$this->db->escape($this->label)."'" : "null").",";
+        $sql .= " '".$this->db->escape($this->desc)."',";
+        $sql .= " ".price2num($this->qty).",";
+        $sql .= " ".price2num($this->tva_tx).",";
+        $sql .= " ".price2num($this->subprice).",";
+        $sql .= " ".(!empty($this->date_creation) ? "'".$this->db->idate($this->date_creation)."'" : "null").",";
+        $sql .= " ".(!empty($this->tms) ? "'".$this->db->idate($this->tms)."'" : "null").",";
+        $sql .= " ".$this->rang.',';
+        $sql .= " ".price2num($this->total_ht).",";
+        $sql .= " ".price2num($this->total_tva).",";
+        $sql .= " ".price2num($this->total_ttc).",";
+        $sql .= " ".(!$this->fk_unit ? 'NULL' : $this->fk_unit);
+        $sql .= ", ".$user->id;
+        $sql .= ", ".$user->id;
+        $sql .= ')';
+
+        dol_syslog(get_class($this)."::insert", LOG_DEBUG);
+        $resql = $this->db->query($sql);
+        if ($resql)
+        {
+            $this->id = $this->db->last_insert_id(MAIN_DB_PREFIX.'semparpmp_decompteline');
+            $this->rowid = $this->id; // For backward compatibility
+
+            if (!$error)
+            {
+                $result = $this->insertExtraFields();
+                if ($result < 0)
+                {
+                    $error++;
+                }
+            }
+
+
+            if (!$notrigger)
+            {
+                // Call trigger
+                $result = $this->call_trigger('LINEBILL_INSERT', $user);
+                if ($result < 0)
+                {
+                    $this->db->rollback();
+                    return -2;
+                }
+                // End call triggers
+            }
+
+            $this->db->commit();
+            return $this->id;
+        } else {
+            $this->error = $this->db->lasterror();
+            $this->db->rollback();
+            return -2;
+        }
+    }
+
+    /**
+     *	Update line into database
+     *
+     *	@param		User	$user		User object
+     *	@param		int		$notrigger	Disable triggers
+     *	@return		int					<0 if KO, >0 if OK
+     */
+    public function update($user = '', $notrigger = 0)
+    {
+        global $user, $conf;
+
+        $error = 0;
+
+
+        // Clean parameters
+        $this->desc = trim($this->desc);
+        if (empty($this->tva_tx)) $this->tva_tx = 0;
+
+
+        $this->db->begin();
+
+        // Update line in database
+        $sql = "UPDATE ".MAIN_DB_PREFIX."semparpmp_decompteline SET";
+        $sql .= " description='".$this->db->escape($this->desc)."'";
+        $sql .= ", label=".(!empty($this->label) ? "'".$this->db->escape($this->label)."'" : "null");
+        $sql .= ", subprice=".price2num($this->subprice)."";
+        $sql .= ", tva_tx=".price2num($this->tva_tx)."";
+        $sql .= ", qty=".price2num($this->qty);
+        $sql .= ", date_creation=".(!empty($this->date_creation) ? "'".$this->db->idate($this->date_creation)."'" : "null");
+        $sql .= ", tms=".(!empty($this->tms) ? "'".$this->db->idate($this->tms)."'" : "null");
+        if (!empty($this->rang)) $sql .= ", rang=".$this->rang;
+        $sql .= ", fk_unit=".(!$this->fk_unit ? 'NULL' : $this->fk_unit);
+        $sql .= ", fk_user_modif =".$user->id;
+
+
+        $sql .= " WHERE rowid = ".$this->rowid;
+
+        dol_syslog(get_class($this)."::update", LOG_DEBUG);
+        $resql = $this->db->query($sql);
+        if ($resql)
+        {
+            if (!$error)
+            {
+                $this->id = $this->rowid;
+                $result = $this->insertExtraFields();
+                if ($result < 0)
+                {
+                    $error++;
+                }
+            }
+
+            if (!$error && !$notrigger)
+            {
+                // Call trigger
+                $result = $this->call_trigger('LINEBILL_UPDATE', $user);
+                if ($result < 0)
+                {
+                    $this->db->rollback();
+                    return -2;
+                }
+                // End call triggers
+            }
+            $this->db->commit();
+            return 1;
+        } else {
+            $this->error = $this->db->error();
+            $this->db->rollback();
+            return -2;
+        }
+    }
+
+    /**
+     * 	Delete line in database
+     *  TODO Add param User $user and notrigger (see skeleton)
+     *
+     *	@return	    int		           <0 if KO, >0 if OK
+     */
+    public function delete()
+    {
+        global $user;
+
+        $this->db->begin();
+
+        // Call trigger
+        $result = $this->call_trigger('LINEBILL_DELETE', $user);
+        if ($result < 0)
+        {
+            $this->db->rollback();
+            return -1;
+        }
+        // End call triggers
+
+        // extrafields
+        $result = $this->deleteExtraFields();
+        if ($result < 0)
+        {
+            $this->db->rollback();
+            return -1;
+        }
+
+        $sql = "DELETE FROM ".MAIN_DB_PREFIX."semparpmp_decompteline WHERE rowid = ".$this->rowid;
+        dol_syslog(get_class($this)."::delete", LOG_DEBUG);
+        if ($this->db->query($sql))
+        {
+            $this->db->commit();
+            return 1;
+        } else {
+            $this->error = $this->db->error()." sql=".$sql;
+            $this->db->rollback();
+            return -1;
+        }
+    }
+
+    // phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
+    /**
+     *	Update DB line fields total_xxx
+     *	Used by migration
+     *
+     *	@return		int		<0 if KO, >0 if OK
+     */
+    public function update_total()
+    {
+        // phpcs:enable
+        $this->db->begin();
+        dol_syslog(get_class($this)."::update_total", LOG_DEBUG);
+
+
+        // Mise a jour ligne en base
+        $sql = "UPDATE ".MAIN_DB_PREFIX."semparpmp_decompteline SET";
+        $sql .= " total_ht=".price2num($this->total_ht)."";
+        $sql .= ",total_tva=".price2num($this->total_tva)."";
+        $sql .= ",total_ttc=".price2num($this->total_ttc)."";
+        $sql .= " WHERE rowid = ".$this->rowid;
+
+        dol_syslog(get_class($this)."::update_total", LOG_DEBUG);
+
+        $resql = $this->db->query($sql);
+        if ($resql)
+        {
+            $this->db->commit();
+            return 1;
+        } else {
+            $this->error = $this->db->error();
+            $this->db->rollback();
+            return -2;
+        }
+    }
 }
