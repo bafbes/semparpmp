@@ -64,6 +64,7 @@ if (!$res && file_exists("../../main.inc.php")) $res = @include "../../main.inc.
 if (!$res && file_exists("../../../main.inc.php")) $res = @include "../../../main.inc.php";
 if (!$res) die("Include of main fails");
 
+
 require_once DOL_DOCUMENT_ROOT . '/core/class/html.formcompany.class.php';
 require_once DOL_DOCUMENT_ROOT . '/core/class/html.formfile.class.php';
 require_once DOL_DOCUMENT_ROOT . '/core/class/html.formprojet.class.php';
@@ -86,7 +87,7 @@ $backtopageforcancel = GETPOST('backtopageforcancel', 'alpha');
 $origin = GETPOST('origin', 'alpha');
 $originid = (GETPOST('originid', 'int') ? GETPOST('originid', 'int') : GETPOST('origin_id', 'int')); // For backward compatibility
 
-//$lineid   = GETPOST('lineid', 'int');
+$lineid = GETPOST('lineid', 'int');
 
 // Initialize technical objects
 $object = new Decompte($db);
@@ -451,10 +452,10 @@ if (empty($reshook)) {
         $localtax1_rate = get_localtax($vat_rate, 1, $object->thirdparty, $mysoc);
         $localtax2_rate = get_localtax($vat_rate, 2, $object->thirdparty, $mysoc);
         foreach ($object->lines as $line) {
-            $result = $object->updateline($line->id, $line->desc, $line->subprice, $line->qty, $line->remise_percent, $line->date_start, $line->date_end, $vat_rate, $localtax1_rate, $localtax2_rate, 'HT', $line->info_bits, $line->product_type, $line->fk_parent_line, 0, $line->fk_fournprice, $line->pa_ht, $line->label, $line->special_code, $line->array_options, $line->situation_percent, $line->fk_unit, $line->multicurrency_subprice);
+            $result = $object->updateline($line->id, $line->desc, $line->subprice, $line->qty,  $line->date_start, $line->date_end, $vat_rate, $localtax1_rate, $localtax2_rate, 'HT', $line->info_bits, $line->product_type, $line->fk_parent_line, 0, $line->fk_fournprice, $line->pa_ht, $line->label, $line->special_code, $line->array_options, $line->situation_percent, $line->fk_unit, $line->multicurrency_subprice);
         }
     }
-    elseif ($action == 'addline' && $usercancreate)		// Add a new line
+    elseif ($action == 'addline')		// Add a new line
     {
         $langs->load('errors');
         $error = 0;
@@ -463,7 +464,6 @@ if (empty($reshook)) {
         $predef = '';
         $product_desc = (GETPOST('dp_desc', 'none') ?GETPOST('dp_desc', 'restricthtml') : '');
         $price_ht = price2num(GETPOST('price_ht'), 'MU', 2);
-        $price_ht_devise = price2num(GETPOST('multicurrency_price_ht'), 'CU', 2);
         $prod_entry_mode = GETPOST('prod_entry_mode', 'alpha');
         if ($prod_entry_mode == 'free')
         {
@@ -475,7 +475,6 @@ if (empty($reshook)) {
         }
 
         $qty = GETPOST('qty'.$predef);
-        $remise_percent = GETPOST('remise_percent'.$predef);
 
         // Extrafields
         $extralabelsline = $extrafields->fetch_name_optionals_label($object->table_element_line);
@@ -503,23 +502,6 @@ if (empty($reshook)) {
         if ($prod_entry_mode == 'free' && empty($idprod) && GETPOST('type') < 0) {
             setEventMessages($langs->trans('ErrorFieldRequired', $langs->transnoentitiesnoconv('Type')), null, 'errors');
             $error++;
-        }
-        if (($prod_entry_mode == 'free' && empty($idprod) && (($price_ht < 0 && empty($conf->global->FACTURE_ENABLE_NEGATIVE_LINES)) || $price_ht == '') && $price_ht_devise == '') && $object->type != Facture::TYPE_CREDIT_NOTE) 	// Unit price can be 0 but not ''
-        {
-            if ($price_ht < 0 && empty($conf->global->FACTURE_ENABLE_NEGATIVE_LINES))
-            {
-                $langs->load("errors");
-                if ($object->type == $object::TYPE_DEPOSIT) {
-                    // Using negative lines on deposit lead to headach and blocking problems when you want to consume them.
-                    setEventMessages($langs->trans("ErrorLinesCantBeNegativeOnDeposits"), null, 'errors');
-                } else {
-                    setEventMessages($langs->trans("ErrorFieldCantBeNegativeOnInvoice", $langs->transnoentitiesnoconv("UnitPriceHT"), $langs->transnoentitiesnoconv("CustomerAbsoluteDiscountShort")), null, 'errors');
-                }
-                $error++;
-            } else {
-                setEventMessages($langs->trans("ErrorFieldRequired", $langs->transnoentitiesnoconv("UnitPriceHT")), null, 'errors');
-                $error++;
-            }
         }
         if ($qty == '') {
             setEventMessages($langs->trans('ErrorFieldRequired', $langs->transnoentitiesnoconv('Qty')), null, 'errors');
@@ -558,8 +540,8 @@ if (empty($reshook)) {
             $ret = $object->fetch_thirdparty();
 
             // Clean parameters
-            $date_start = dol_mktime(GETPOST('date_start'.$predef.'hour'), GETPOST('date_start'.$predef.'min'), GETPOST('date_start'.$predef.'sec'), GETPOST('date_start'.$predef.'month'), GETPOST('date_start'.$predef.'day'), GETPOST('date_start'.$predef.'year'));
-            $date_end = dol_mktime(GETPOST('date_end'.$predef.'hour'), GETPOST('date_end'.$predef.'min'), GETPOST('date_end'.$predef.'sec'), GETPOST('date_end'.$predef.'month'), GETPOST('date_end'.$predef.'day'), GETPOST('date_end'.$predef.'year'));
+            $date_creation = dol_mktime(GETPOST('date_creation'.$predef.'hour'), GETPOST('date_creation'.$predef.'min'), GETPOST('date_creation'.$predef.'sec'), GETPOST('date_creation'.$predef.'month'), GETPOST('date_creation'.$predef.'day'), GETPOST('date_creation'.$predef.'year'));
+            $tms = dol_mktime(GETPOST('tms'.$predef.'hour'), GETPOST('tms'.$predef.'min'), GETPOST('tms'.$predef.'sec'), GETPOST('tms'.$predef.'month'), GETPOST('tms'.$predef.'day'), GETPOST('tms'.$predef.'year'));
             $price_base_type = (GETPOST('price_base_type', 'alpha') ? GETPOST('price_base_type', 'alpha') : 'HT');
 
             // Define special_code for special lines
@@ -680,15 +662,12 @@ if (empty($reshook)) {
                 $desc = $product_desc;
                 $type = GETPOST('type');
                 $fk_unit = GETPOST('units', 'alpha');
-                $pu_ht_devise = price2num($price_ht_devise, 'MU');
             }
 
 
             $price2num_pu_ht = price2num($pu_ht);
-            $price2num_remise_percent = price2num($remise_percent);
             $price2num_price_min = price2num($price_min);
             if (empty($price2num_pu_ht)) $price2num_pu_ht = 0;
-            if (empty($price2num_remise_percent)) $price2num_remise_percent = 0;
             if (empty($price2num_price_min)) $price2num_price_min = 0;
 
             if ($usercanproductignorepricemin && (!empty($price_min) && ($price2num_pu_ht * (1 - $price2num_remise_percent / 100) < $price2num_price_min))) {
@@ -696,7 +675,7 @@ if (empty($reshook)) {
                 setEventMessages($mesg, null, 'errors');
             } else {
                 // Insert line
-                $result = $object->addline($desc, $pu_ht, $qty, $tva_tx, $localtax1_tx, $localtax2_tx, $idprod, $remise_percent, $date_start, $date_end, 0, $info_bits, '', $price_base_type, $pu_ttc, $type, - 1, $special_code, '', 0, GETPOST('fk_parent_line'), $fournprice, $buyingprice, $label, $array_options, $_POST['progress'], '', $fk_unit, $pu_ht_devise);
+                $result = $object->addline($desc, $pu_ht, $qty, $tva_tx, $date_creation, $tms, $price_base_type, $pu_ttc, - 1, '', 0, GETPOST('fk_parent_line'),  $label, $array_options, $fk_unit);
 
                 if ($result > 0)
                 {
@@ -723,34 +702,30 @@ if (empty($reshook)) {
 
                     unset($_POST['qty']);
                     unset($_POST['type']);
-                    unset($_POST['remise_percent']);
                     unset($_POST['price_ht']);
-                    unset($_POST['multicurrency_price_ht']);
                     unset($_POST['price_ttc']);
                     unset($_POST['tva_tx']);
                     unset($_POST['product_ref']);
                     unset($_POST['product_label']);
                     unset($_POST['product_desc']);
-                    unset($_POST['fournprice']);
-                    unset($_POST['buying_price']);
                     unset($_POST['np_marginRate']);
                     unset($_POST['np_markRate']);
                     unset($_POST['dp_desc']);
                     unset($_POST['idprod']);
                     unset($_POST['units']);
 
-                    unset($_POST['date_starthour']);
-                    unset($_POST['date_startmin']);
-                    unset($_POST['date_startsec']);
-                    unset($_POST['date_startday']);
-                    unset($_POST['date_startmonth']);
-                    unset($_POST['date_startyear']);
-                    unset($_POST['date_endhour']);
-                    unset($_POST['date_endmin']);
-                    unset($_POST['date_endsec']);
-                    unset($_POST['date_endday']);
-                    unset($_POST['date_endmonth']);
-                    unset($_POST['date_endyear']);
+                    unset($_POST['date_creationhour']);
+                    unset($_POST['date_creationmin']);
+                    unset($_POST['date_creationsec']);
+                    unset($_POST['date_creationday']);
+                    unset($_POST['date_creationmonth']);
+                    unset($_POST['date_creationyear']);
+                    unset($_POST['tmshour']);
+                    unset($_POST['tmsmin']);
+                    unset($_POST['tmssec']);
+                    unset($_POST['tmsday']);
+                    unset($_POST['tmsmonth']);
+                    unset($_POST['tmsyear']);
 
                     unset($_POST['situations']);
                     unset($_POST['progress']);
@@ -1464,6 +1439,9 @@ if ($object->id > 0 && (empty($action) || ($action != 'edit' && $action != 'crea
     if ($action == 'deleteline') {
         $formconfirm = $form->formconfirm($_SERVER["PHP_SELF"] . '?id=' . $object->id . '&lineid=' . $lineid, $langs->trans('DeleteLine'), $langs->trans('ConfirmDeleteLine'), 'confirm_deleteline', '', 0, 1);
     }
+    //if ($action == 'ask_deleteline') {
+       // $formconfirm = $form->formconfirm($_SERVER["PHP_SELF"].'?facid='.$object->id.'&lineid='.$lineid, $langs->trans('DeleteProductLine'), $langs->trans('ConfirmDeleteProductLine'), 'confirm_deleteline', '', 'no', 1);
+    //}
     // Clone confirmation
     if ($action == 'clone') {
         // Create an array for form
@@ -1604,6 +1582,49 @@ if ($object->id > 0 && (empty($action) || ($action != 'edit' && $action != 'crea
 
     // Lines
     $result = $object->getLinesArray();
+
+    if (1)
+    {
+        if ($object->situation_cycle_ref && $object->statut == 0)
+        {
+            print '<!-- Area to change globally the situation percent -->'."\n";
+            print '<div class="div-table-responsive">';
+
+            print '<form name="updatealllines" id="updatealllines" action="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'#updatealllines" method="POST">';
+            print '<input type="hidden" name="token" value="'.newToken().'" />';
+            print '<input type="hidden" name="action" value="updatealllines" />';
+            print '<input type="hidden" name="id" value="'.$object->id.'" />';
+
+            print '<table id="tablelines_all_progress" class="noborder noshadow" width="100%">';
+
+            print '<tr class="liste_titre nodrag nodrop">';
+
+            // Adds a line numbering column
+            if (!empty($conf->global->MAIN_VIEW_LINE_NUMBER)) {
+                print '<td align="center" width="5">&nbsp;</td>';
+            }
+            print '<td class="minwidth500imp">'.$langs->trans('ModifyAllLines').'</td>';
+            print '<td class="right">'.$langs->trans('Progress').'</td>';
+            print '<td>&nbsp;</td>';
+            print "</tr>\n";
+
+            print '<tr class="nodrag nodrop">';
+            // Adds a line numbering column
+            if (!empty($conf->global->MAIN_VIEW_LINE_NUMBER)) {
+                print '<td align="center" width="5">&nbsp;</td>';
+            }
+            print '<td>&nbsp;</td>';
+            print '<td class="nowrap right"><input type="text" size="1" value="" name="all_progress">%</td>';
+            print '<td class="right"><input class="button" type="submit" name="all_percent" value="Modifier" /></td>';
+            print '</tr>';
+
+            print '</table>';
+
+            print '</form>';
+
+            print '</div>';
+        }
+    }
 
     print '	<form name="addproduct" id="addproduct" action="'.$_SERVER["PHP_SELF"].'?id='.$object->id.(($action != 'editline') ? '#addline' : '#line_'.GETPOST('lineid')).'" method="POST">
 	<input type="hidden" name="token" value="' . newToken().'">

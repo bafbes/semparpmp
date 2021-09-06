@@ -227,6 +227,8 @@ class Decompte extends CommonObject
 		}
 	}
 
+
+
     /**
      *  Add an invoice line into database (linked to product/service or not).
      *  Les parametres sont deja cense etre juste et avec valeurs finales a l'appel
@@ -335,8 +337,7 @@ class Decompte extends CommonObject
             // TRES IMPORTANT: C'est au moment de l'insertion ligne qu'on doit stocker
             // la part ht, tva et ttc, et ce au niveau de la ligne qui a son propre taux tva.
 
-            $tabprice = calcul_price_total($qty, $pu, $remise_percent=0, $txtva, $txlocaltax1=0, $txlocaltax2=0, 0, $price_base_type, $info_bits='', $product_type='', $mysoc, $localtaxes_type='', $situation_percent=0, $this->multicurrency_tx, $pu_ht_devise=0);
-
+            $tabprice = calcul_price_total($qty, $pu, $remise_percent="0", $txtva, $txlocaltax1="0", $txlocaltax2="0", 0, $price_base_type, $info_bits=0, $product_type="0", $mysoc, $localtaxes_type=[0], $situation_percent=100, $this->multicurrency_tx="1.00000000", $pu_ht_devise="0");
             $total_ht  = $tabprice[0];
             $total_tva = $tabprice[1];
             $total_ttc = $tabprice[2];
@@ -1602,7 +1603,7 @@ class DecompteLine extends CommonObjectLine
         $sql .= " ".price2num($this->total_ht).",";
         $sql .= " ".price2num($this->total_tva).",";
         $sql .= " ".price2num($this->total_ttc).",";
-        $sql .= " ".(!$this->fk_unit ? 'NULL' : $this->fk_unit);
+        $sql .= " ".(!$this->fk_unit ? 'null' : $this->fk_unit);
         $sql .= ", ".$user->id;
         $sql .= ", ".$user->id;
         $sql .= ')';
